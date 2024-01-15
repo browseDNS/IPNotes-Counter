@@ -2,42 +2,22 @@ package main
 
 import (
 	"encoding/json"
-	"fmt"
-	"io/ioutil"
 	"log"
 	"net"
 	"net/http"
 	"strconv"
 	"time"
 
-	"github.com/patrickmn/go-cache"
+	"github.com/jellydator/ttlcache/v3"
 )
 
-type Lane struct {
-	Headers map[string]string `json:"headers"`
-	Content string            `json:"content"`
-	LaneKey string            `json:"-"`
+type NotesCount struct {
+	Domain string `json:"domain"`
+	Count  int    `json:"count"`
 }
 
-type Config struct {
-	Default string          `json:"default"`
-	Lanes   map[string]Lane `json:"lanes"`
-}
-
-type ConfigWithPort struct {
-	*Config
-	Port int `json:"port"`
-}
-
-type LaneChange struct {
-	LaneKey  string        `json:"lane"`
-	Duration time.Duration `json:"duration"`
-}
-
-type LaneChangeResp struct {
-	LaneKey string    `json:"lane"`
-	Expires time.Time `json:"expires"`
-	IP      string    `json:"ip"`
+type NotesRequest struct {
+	Domain string `json:"domain"`
 }
 
 // https://golangcode.com/get-the-request-ip-addr/
@@ -51,134 +31,84 @@ func GetIP(r *http.Request) string {
 	return ip
 }
 
+func GetDomain(r *http.Request) string {
+	forwarded := r.Header.Get("X-Forwarded-Host")
+	if forwarded != "" {
+		return forwarded
+	}
+	return r.Host
+}
+
 func main() {
-	log.Println("Welcome to LaneChange, see the readme for more information")
+	log.Println("Welcome to the IPNotes Counter, see the readme for more information")
 
-	// try to open config file
-	jsonData, err := ioutil.ReadFile("config.json")
+	domainCacheTimeout := 24 * time.Hour
+	userCacheTimeout := 20 * time.Minute
+	// userCacheTimeout := 30 * time.Second // debugging
 
-	if err != nil {
-		fmt.Println("Error:", err)
-		fmt.Println("Ensure that config.json exists in the current directory and is well-formatted")
-		return
-	}
+	cacheOfCaches := ttlcache.New(
+		ttlcache.WithTTL[string, *ttlcache.Cache[string, bool]](domainCacheTimeout),
+	)
 
-	// load our preferences from the config file
-	// and some error handling
-	var config ConfigWithPort
-	err = json.Unmarshal(jsonData, &config)
-
-	if err != nil {
-		fmt.Println("Error:", err)
-		fmt.Println("An issue was encountered trying to parse config.json")
-		return
-	}
-
-	if config.Port == 0 || config.Default == "" || len(config.Lanes) == 0 {
-		fmt.Println("Error: Check that \"port\", \"default\", and \"lanes\" keys are all provided in config.json!")
-		return
-	}
-
-	defaultLane, ok := config.Lanes[config.Default]
-	if !ok {
-		fmt.Printf("Error: Provided default key \"%s\" does not exist in lanes!\n", config.Default)
-		return
-	}
-
-	for laneKey, lane := range config.Lanes {
-		// hookup the key inside the lane for reference later
-		lane.LaneKey = laneKey
-		config.Lanes[laneKey] = lane
-	}
-
-	// setup the cache (drop expired every 10 min)
-	// TODO: load from disk in case we crashed
-	users := cache.New(cache.NoExpiration, 10*time.Minute)
-
-	// our main endpoint, lookup our lane for the incoming IP
-	// and return the expected response for that lane here
-	http.HandleFunc("/", func(res http.ResponseWriter, req *http.Request) {
-		ip := GetIP(req)
-
-		// lookup current lane for our user
-		var lane *Lane
-		lane = &defaultLane
-		userLane, found := users.Get(ip)
-		if found {
-			lane = userLane.(*Lane)
-		}
-
-		// apply lane headers
-		headers := res.Header()
-		headers.Set("Cache-Control", "max-age=0, no-cache, no-store")
-		for key, value := range lane.Headers {
-			headers.Set(key, value)
-		}
-
-		// write lane content
-		fmt.Fprintf(res, lane.Content)
-	})
-
-	http.HandleFunc("/change", func(res http.ResponseWriter, req *http.Request) {
-		ip := GetIP(req)
-		headers := res.Header()
-		headers.Set("Access-Control-Allow-Origin", "*")
-		headers.Set("Access-Control-Allow-Methods", "GET, POST, DELETE")
-
-		if req.Method == http.MethodDelete {
-			// remove entry for IP (does nothing if doesn't exist)
-			users.Delete(ip)
-			return
-		}
-
-		// process incoming lane change preference
-		if req.Method == http.MethodPost {
-			var change LaneChange
-
-			err := json.NewDecoder(req.Body).Decode(&change)
-			if err != nil {
-				http.Error(res, err.Error(), http.StatusBadRequest)
-				return
-			}
-
-			userLane, ok := config.Lanes[change.LaneKey]
-			if ok {
-				// set the lane pointer for this IP, expire with their duration
-				// if duration is omitted, will be 0, which will go to the default expiry
-				users.Set(ip, &userLane, change.Duration*time.Second)
-				return
-			}
-
-			http.Error(res, "Error with request (Lane key invalid?)", http.StatusBadRequest)
-			return
-		}
-
-		// try to lookup user (GET)
-		userLane, expiration, found := users.GetWithExpiration(ip)
-		if found {
-			var change LaneChangeResp
-			change.LaneKey = userLane.(*Lane).LaneKey
-			change.Expires = expiration
-			change.IP = ip
-			output, _ := json.MarshalIndent(change, "", "\t")
-			res.Write(output)
-			return
-		}
-		res.WriteHeader(http.StatusNotFound)
-	})
-
-	http.HandleFunc("/config", func(res http.ResponseWriter, req *http.Request) {
+	// our main endpoint, receive the domain and IP and increment the count
+	http.HandleFunc("/count", func(res http.ResponseWriter, req *http.Request) {
 		res.Header().Set("Access-Control-Allow-Origin", "*")
 
-		// respond with our config, but don't expose port
-		var configNoPort Config
-		configNoPort.Lanes = config.Lanes
-		configNoPort.Default = config.Default
-		output, _ := json.MarshalIndent(configNoPort, "", "\t")
+		ip := GetIP(req)
+		domain := req.Host
+
+		// get the IP cache of this domain, or create it if it doesn't exist
+		userResp := cacheOfCaches.Get(domain)
+		var userCache *ttlcache.Cache[string, bool]
+		if userResp == nil {
+			newCache := ttlcache.New(
+				ttlcache.WithTTL[string, bool](userCacheTimeout),
+			)
+			cacheOfCaches.Set(domain, newCache, domainCacheTimeout)
+			userCache = newCache
+			go userCache.Start()
+		} else {
+			userCache = userResp.Value()
+		}
+
+		// track this IP under this domain
+		userCache.Set(ip, true, userCacheTimeout)
+
+		// return the count
+		count := NotesCount{Domain: domain, Count: int(userCache.Len())}
+		output, _ := json.MarshalIndent(count, "", "\t")
 		res.Write(output)
 	})
 
-	log.Printf("Listening on localhost:%d\n", config.Port)
+	http.HandleFunc("/", func(res http.ResponseWriter, req *http.Request) {
+		res.Header().Set("Access-Control-Allow-Origin", "*")
 
-	log.Fatal(http.ListenAndServe(":"+strconv.Itoa(config.Port), nil))
+		// respond with the count for this domain, irrespective of IP (for read only)
+		// get the domain from the request (query param)
+		domain := req.URL.Query().Get("domain")
+		if domain == "" {
+			res.WriteHeader(http.StatusBadRequest)
+			res.Write([]byte("Please provide a domain, e.g. ?domain=example.com"))
+			return
+		}
+
+		userResp := cacheOfCaches.Get(domain)
+		userCount := -1
+		if userResp != nil {
+			userCache := userResp.Value()
+			userCount = int(userCache.Len())
+		}
+
+		// return the count
+		count := NotesCount{Domain: domain, Count: userCount}
+		output, _ := json.MarshalIndent(count, "", "\t")
+		res.Write(output)
+	})
+
+	port := 7711
+	log.Printf("Listening on localhost:%d\n", port)
+
+	go cacheOfCaches.Start()
+
+	log.Fatal(http.ListenAndServe(":"+strconv.Itoa(port), nil))
 }

@@ -5,7 +5,7 @@
     var targetDomain = new URLSearchParams(window.location.search).get("domain");
     // build URL to fetch count from
     // var url = "http://127.0.0.1:7711?domain=" + targetDomain;
-    var url = "https://ipnotes.page?domain=" + targetDomain;
+    var url = "https://ipnotes.page/stats?domain=" + targetDomain;
     // fetch count from URL with AJAX
     var xhr = new XMLHttpRequest();
     xhr.open("GET", url);

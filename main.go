@@ -6,6 +6,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"os"
 	"strconv"
 	"time"
 
@@ -52,6 +53,24 @@ func GetDomain(r *http.Request) string {
 		return GetJustDomain(referer)
 	}
 	return ""
+}
+
+func getByesOfFileAtPath(name string) []byte {
+	file, err := os.Open(name)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer file.Close()
+	stat, err := file.Stat()
+	if err != nil {
+		log.Fatal(err)
+	}
+	bs := make([]byte, stat.Size())
+	_, err = file.Read(bs)
+	if err != nil {
+		log.Fatal(err)
+	}
+	return bs
 }
 
 func main() {
@@ -101,7 +120,7 @@ func main() {
 		res.Write(output)
 	})
 
-	http.HandleFunc("/", func(res http.ResponseWriter, req *http.Request) {
+	http.HandleFunc("/stats", func(res http.ResponseWriter, req *http.Request) {
 		res.Header().Set("Access-Control-Allow-Origin", "*")
 
 		// respond with the count for this domain, irrespective of IP (for read only)
@@ -124,6 +143,28 @@ func main() {
 		count := NotesCount{Domain: domain, Count: userCount}
 		output, _ := json.MarshalIndent(count, "", "\t")
 		res.Write(output)
+	})
+
+	// serve the static files
+
+	// read some static files into memory
+	indexHtml := getByesOfFileAtPath("./index.html")
+	taggerJs := getByesOfFileAtPath("./tagger.js")
+	widgetHtml := getByesOfFileAtPath("./widget.html")
+
+	http.HandleFunc("/", func(res http.ResponseWriter, req *http.Request) {
+		res.Header().Set("Access-Control-Allow-Origin", "*")
+		res.Write(indexHtml)
+	})
+
+	http.HandleFunc("/tag", func(res http.ResponseWriter, req *http.Request) {
+		res.Header().Set("Access-Control-Allow-Origin", "*")
+		res.Write(taggerJs)
+	})
+
+	http.HandleFunc("/view", func(res http.ResponseWriter, req *http.Request) {
+		res.Header().Set("Access-Control-Allow-Origin", "*")
+		res.Write(widgetHtml)
 	})
 
 	port := 7711

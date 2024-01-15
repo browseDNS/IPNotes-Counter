@@ -5,6 +5,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"net/url"
 	"strconv"
 	"time"
 
@@ -31,12 +32,26 @@ func GetIP(r *http.Request) string {
 	return ip
 }
 
-func GetDomain(r *http.Request) string {
-	forwarded := r.Header.Get("X-Forwarded-Host")
-	if forwarded != "" {
-		return forwarded
+func GetJustDomain(myUrl string) string {
+	// turns a URL into just the domain
+	// e.g. https://example.com/notes -> example.com
+	parsedUrl, err := url.Parse(myUrl)
+	if err != nil {
+		return ""
 	}
-	return r.Host
+	return parsedUrl.Hostname()
+}
+
+func GetDomain(r *http.Request) string {
+	forwarded := r.Header.Get("Origin")
+	if forwarded != "" {
+		return GetJustDomain(forwarded)
+	}
+	referer := r.Header.Get("Referer")
+	if referer != "" {
+		return GetJustDomain(referer)
+	}
+	return ""
 }
 
 func main() {
@@ -55,7 +70,13 @@ func main() {
 		res.Header().Set("Access-Control-Allow-Origin", "*")
 
 		ip := GetIP(req)
-		domain := req.Host
+		domain := GetDomain(req)
+
+		if domain == "" {
+			res.WriteHeader(http.StatusBadRequest)
+			res.Write([]byte("Please provide a an Origin or Referer header in your request."))
+			return
+		}
 
 		// get the IP cache of this domain, or create it if it doesn't exist
 		userResp := cacheOfCaches.Get(domain)

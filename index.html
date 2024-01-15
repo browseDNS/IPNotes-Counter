@@ -1,0 +1,65 @@
+<style>
+    body {
+        font-family: sans-serif;
+        width: 100%;
+        margin: 0 auto;
+    }
+    #main {
+        margin: 0 auto;
+        max-width: 800px;
+        margin-top: 1rem;
+        padding-left: 2.5rem;
+        padding-right: 2.5rem;
+    }
+    h2 {
+        font-size: 2em;
+    }
+    h3 {
+        font-size: 1.5em;
+    }
+    p {
+        font-size: 1.2em;
+    }
+    pre {
+        font-size: 1.2em;
+        background-color: #eee;
+        padding: 1em;
+        border-radius: 0.5em;
+        overflow-wrap: anywhere;
+        white-space: pre-line;
+    }
+    ul {
+        font-size: 1.2em;
+    }
+    iframe {
+        border: 0;
+    }
+</style>
+
+<body>
+    <div id="main">
+        <h2>IP Notes Tagger</h2>
+        <h3>What is it?</h3>
+        <p>IP Notes is a free service from <a href="https://browsedns.net">BrowseDNS</a> to track and count the number of unique active users within the last 20 minutes on your domain. This is useful to display a "live count" of how many people are on a page at a time.</p>
+        <p>IP Notes is a free service, but we do ask that you link back to us on your site. This helps us grow and keep the service free.</p>
+
+        <h3>How to use</h3>
+        <p>To count up a unique view, add the following code to the page served off the domain that you want to track:</p>
+        <pre>
+            &lt;script src="https://ipnotes.page/tagger.js"&gt;&lt;/script&gt;
+        </pre>
+
+        <p>To display the count, add the following code to the page where you want to display the count, replacing <code>example.com</code> with your domain:</p>
+        <pre>
+            &lt;iframe src="https://ipnotes.page/widget.html?domain=example.com" width="256px" height="100px" frameborder="0"&gt;&lt;/iframe&gt;
+        </pre>
+        <!--
+        <p>You can add some additional parameters to the widget URL to customize its appearance:</p>
+        <ul>
+            <li><pre>domain</pre></li> - The domain to display counted users for. Required.
+            <li><pre>color</pre></li> - The text color of the widget. Default is <pre>#000000</pre>.
+            <li><pre>background</pre></li> - The background color of the widget. Default is <pre>#ffffff</pre>.
+        </ul>
+        -->
+    </div>
+</body>
